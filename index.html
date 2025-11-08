@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Drive-like File Upload and Download</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f1f1f1;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 80%;
+            margin: 50px auto;
+            background-color: #fff;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            border-radius: 10px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        #totalSize {
+            font-size: 1rem;
+            color: #555;
+            margin-bottom: 10px;
+        }
+        #uploadForm, #bulkUploadForm {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        input[type="file"] {
+            margin-right: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        progress {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-actions button {
+            margin-left: 10px;
+        }
+        .bulk-actions {
+            margin: 20px 0;
+        }
+        .file-checkbox {
+            width: 20px;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>File Upload and Download</h1>
+        <form id="uploadForm">
+            <input type="file" id="fileInput" name="file" required>
+            <button type="submit">Upload</button>
+        </form>
+        <form id="bulkUploadForm">
+            <input type="file" id="bulkFileInput" name="files" multiple required>
+            <button type="submit">Bulk Upload</button>
+        </form>
+        <progress id="progressBar" value="0" max="100" style="display: none;"></progress>
+        
+        <h2>Uploaded Files</h2>
+        <p id="totalSize">Total Size: 0 MB</p>
+        <input type="text" id="searchInput" placeholder="Search files...">
+        
+        <div class="bulk-actions">
+            <button id="bulkDownload">Bulk Download</button>
+            <button id="bulkDelete">Bulk Delete</button>
+        </div>
+        
+        <div id="fileList"></div>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('uploadForm');
+        const bulkUploadForm = document.getElementById('bulkUploadForm');
+        const fileInput = document.getElementById('fileInput');
+        const bulkFileInput = document.getElementById('bulkFileInput');
+        const progressBar = document.getElementById('progressBar');
+        const fileList = document.getElementById('fileList');
+        const searchInput = document.getElementById('searchInput');
+        const bulkDownload = document.getElementById('bulkDownload');
+        const bulkDelete = document.getElementById('bulkDelete');
+        const totalSizeElement = document.getElementById('totalSize');
+
+        uploadForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            uploadFile(file);
+        });
+
+        bulkUploadForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const files = bulkFileInput.files;
+            if (files.length === 0) return;
+
+            for (const file of files) {
+                uploadFile(file);
+            }
+        });
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/upload', true);
+
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    progressBar.style.display = 'block';
+                    progressBar.value = percentComplete;
+                }
+            };
+
+            xhr.onload = function() {
+                progressBar.style.display = 'none';
+                if (xhr.status === 200) {
+                    alert('File uploaded successfully!');
+                    refreshFileList();
+                } else {
+                    alert('Error uploading file.');
+                }
+            };
+
+            xhr.send(formData);
+        }
+
+        async function refreshFileList() {
+            const response = await fetch('/files');
+            const files = await response.json();
+            fileList.innerHTML = '';
+
+            let totalSize = 0; // Initialize total size
+
+            files.forEach(file => {
+                totalSize += file.fileSize; // Accumulate file sizes
+                
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+
+                const fileInfo = document.createElement('span');
+                fileInfo.textContent = `${file.fileName} (${(file.fileSize / (1024 * 1024)).toFixed(2)} MB)`;
+
+                const fileActions = document.createElement('div');
+                fileActions.className = 'file-actions';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'file-checkbox';
+                checkbox.value = file.id;
+
+                const downloadButton = document.createElement('button');
+                downloadButton.textContent = 'Download';
+                downloadButton.addEventListener('click', () => downloadFile(file.id, file.fileName));
+
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.addEventListener('click', () => deleteFile(file.id));
+
+                fileActions.appendChild(checkbox);
+                fileActions.appendChild(downloadButton);
+                fileActions.appendChild(deleteButton);
+
+                fileItem.appendChild(fileInfo);
+                fileItem.appendChild(fileActions);
+
+                fileList.appendChild(fileItem);
+            });
+
+            // Update the total size element
+            totalSizeElement.textContent = `Total Size: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`;
+        }
+
+        function downloadFile(fileId, fileName) {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `/download/${fileId}`, true);
+            xhr.responseType = 'blob';
+
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    const blob = xhr.response;
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                } else if (xhr.readyState === 4) {
+                    alert('Error downloading file.');
+                }
+            };
+
+            xhr.send();
+        }
+
+        async function deleteFile(fileId) {
+            const response = await fetch(`/delete/${fileId}`, { method: 'DELETE' });
+            if (response.ok) {
+                alert('File deleted successfully!');
+                refreshFileList();
+            } else {
+                alert('Error deleting file.');
+            }
+        }
+
+        bulkDownload.addEventListener('click', () => {
+            const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+            checkboxes.forEach(checkbox => {
+                const fileId = checkbox.value;
+                const fileName = checkbox.parentNode.previousSibling.textContent.split(' (')[0];
+                downloadFile(fileId, fileName);
+            });
+        });
+
+        bulkDelete.addEventListener('click', async () => {
+            const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+            for (const checkbox of checkboxes) {
+                const fileId = checkbox.value;
+                await deleteFile(fileId);
+            }
+        });
+
+        searchInput.addEventListener('input', function() {
+            const query = searchInput.value.toLowerCase();
+            const items = document.querySelectorAll('.file-item');
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                item.style.display = text.includes(query) ? '' : 'none';
+            });
+        });
+
+        // Initial file list fetch
+        refreshFileList();
+    </script>
+</body>
+</html>
